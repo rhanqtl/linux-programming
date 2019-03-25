@@ -19,16 +19,34 @@ int parse_opt(const char *opt);
 
 int execute();
 void parse_type(mode_t mode, char buf[]);
-void parse_access_mode(mode_t mode, char buf[]);
+void parse_mode(mode_t mode, char buf[]);
 void parse_time(time_t time, char buf[]);
 void parse_uid(uid_t uid, char buf[]);
 void parse_gid(gid_t gid, char buf[]);
 
-enum parse_result {
+enum ParseResult {
     PARSE_SUCCEEDED = 0,
     PARSE_SYNTAX_ERROR = -1,
     PARSE_UNSUPPORTED_OPT = -2
 };
+
+struct Record {
+    ino_t         re_ino;
+    mode_t        re_mode;
+    short         re_nlink;
+    uid_t         re_uid;
+    gid_t         re_gid;
+    size_t        re_size;
+    time_t        re_mtime;
+    char          re_filename[256];
+    struct Record *child_head;
+    struct Record *child_tail;
+};
+
+struct Record *Record_init(struct stat *statbuf, char fn[]);
+void Record_delete(struct Record *self);
+
+void print_record(struct Record *rec);
 
 bool verbose = FALSE;
 bool current_dir_only = FALSE;
@@ -36,7 +54,8 @@ bool recursive = FALSE;
 bool all = FALSE;
 bool show_inode = FALSE;
 
-int main(int argc, const char *argv[]) {
+int
+main(int argc, const char *argv[]) {
     int result;
     for (int i = 1; i < argc; i++) {
         if ((result = parse_opt(argv[i])) < 0) {
@@ -48,10 +67,10 @@ int main(int argc, const char *argv[]) {
     return 0;
 }
 
-int parse_opt(const char *opt) {
+int
+parse_opt(const char *opt) {
     static const char *SYNTAX_ERROR_FMT = "ls: 语法错误\n";
     static const char *UNSUPPORTED_OPT_FMT = "ls: 不适用的选项 -- %c\n";
-
     char *ptr = opt;
     char ch;
     if ((ch = *ptr++) != '-') {
@@ -85,142 +104,170 @@ int parse_opt(const char *opt) {
 
 /**
  * 
- * \33[30m -- \33[37m 设置前景色
- * 
- * 字颜色:30 - 39
- * 30:黑
-31:红
-32:绿
-33:黄
-34:蓝色
-35:紫色
-36:深绿
-37:白色
+ * \33[30m -- \33[37m
+ * 30: black    31: red         32: green  33: yellow  34: blue
+ * 35: purple   36: dark green  37: white
  */
-int execute() {
-    struct result_rec {
-        ino_t   re_ino;
-        mode_t  re_mode;
-        short   re_nlink;
-        uid_t   re_uid;
-        gid_t   re_gid;
-        off_t   re_size;
-        time_t  re_mtime;
-        char    re_filename[256];
-    };
-    struct result_rec *head = NULL, *tail = NULL;
-
-    char parse_buf[1024];
+int
+execute() {
     struct stat stat_buf;
-    int fd;
+    struct Record *rec;
     if (current_dir_only) {
-        if((fd = open(".", O_RDONLY)) < 0) {
-            perror("无法打开文件: .\n");
-            exit(-1);
-        }
-        fstat(fd, &stat_buf);
-        if (show_inode) {
-            printf("%d ", stat_buf.st_ino);
-        }
-        if (verbose) {
-            memset(parse_buf, 0x00, sizeof(parse_buf));
-            parse_access_mode(stat_buf.st_mode, parse_buf);
-            printf("%s ", parse_buf);
-
-            printf("%d ", stat_buf.st_nlink);
-
-            memset(parse_buf, 0x00, sizeof(parse_buf));
-            parse_uid(stat_buf.st_uid, parse_buf);
-            printf("%s ", parse_buf);
-
-            memset(parse_buf, 0x00, sizeof(parse_buf));
-            parse_gid(stat_buf.st_gid, parse_buf);
-            printf("%s ", parse_buf);
-
-            printf("%d ", stat_buf.st_size);
-
-            memset(parse_buf, 0x00, sizeof(parse_buf));
-            parse_time(stat_buf.st_mtime, parse_buf);
-            printf("%s ", parse_buf);
-        }
-        printf("\33[1;34m.\33[0m\n");
+        lstat(".", &stat_buf);
+        rec = Record_init(&stat_buf, ".");
+        print_record(rec);
+        Record_delete(rec);
     } else {
-        // 只要有 -i 选项都优先显示 i-node 号
-        // -R: 先序遍历
-        // -l: long listing format
-        // -a: 显示所有文件，包括隐藏文件
+        struct Record *head, *tail;
+        head = tail = NULL;
         DIR *pdir = opendir(".");
-        struct dirent *pe;
-        while ((pe = readdir(pdir)) != NULL) {
-            struct result_rec *prec = (struct result_rec *) malloc(sizeof(struct result_rec));
-            prec->re_ino = pe->d_ino;
-            printf("%d %s\n", pe->d_type, pe->d_name);
-            
+        struct dirent *pde;
+        while ((pde = readdir(pdir)) != NULL) {
+            lstat(pde->d_name, &stat_buf);
+            rec = Record_init(&stat_buf, pde->d_name);
+            // TODO: 输出排序
+            print_record(rec);
         }
         closedir(pdir);
     }
 }
 
-/**
-     * S_IFSOCK 0140000  socket
-     * S_IFLNK  0120000  symbolic link
-     * S_IFREG  0100000  ordinary
-     * S_IFBLK  0060000  block dev
-     * S_IFDIR  0040000  dir
-     * S_IFCHR  0020000  character dev
-     * S_IFIFO  0010000  pipe
-     */
-void parse_type(mode_t mode, char buf[]) {
+struct Record *
+Record_init(struct stat *statbuf, char *fn) {
+    struct Record *result = (struct Record *) malloc(sizeof(struct Record));
     
+    result->re_ino = statbuf->st_ino;
+    result->re_mode = statbuf->st_mode;
+    result->re_nlink = statbuf->st_nlink;
+    result->re_uid = statbuf->st_uid;
+    result->re_gid = statbuf->st_gid;
+    result->re_size = statbuf->st_size;
+    result->re_mtime = statbuf->st_mtime;
+    strncpy(result->re_filename, fn, strlen(fn));
+    result->re_filename[strlen(fn)] = '\0';
+    result->child_head = result->child_tail = NULL;
+
+    return result;
 }
 
-/**
- * TODO: sticky bits
- */
-void parse_access_mode(mode_t mode, char buf[]) {
+void 
+Record_delete(struct Record *self) {
+    if (self->child_head == NULL) {
+        free(self);
+    }
+}
+
+void
+print_record(struct Record *rec) {
+    char buf[1024];
+    if (show_inode) {
+        printf("%d ", rec->re_ino);
+    }
+    if (verbose) {
+        parse_mode(rec->re_mode, buf);
+        printf("%s ", buf);
+
+        printf("%d ", rec->re_nlink);
+
+        parse_uid(rec->re_uid, buf);
+        printf("%s ", buf);
+
+        parse_gid(rec->re_gid, buf);
+        printf("%s ", buf);
+
+        // TODO: 对齐
+        printf("%7d ", rec->re_size);
+
+        parse_time(rec->re_mtime, buf);
+        printf("%s ", buf);
+    }
+    if (S_ISDIR(rec->re_mode)) {
+        printf("\33[1;34m");
+    }
+    printf("%s", rec->re_filename);
+    printf("\33[0m\n");
+}
+
+void
+parse_mode(mode_t mode, char buf[]) {
     memset(buf, '-', 10);
+
+    // 设置文件类型
+    if (S_ISDIR(mode)) {
+        buf[0] = 'd';
+    } else if (S_ISBLK(mode)) {
+        buf[0] = 'b';
+    } else if (S_ISCHR(mode)) {
+        buf[0] = 'c';
+    } else if (S_ISFIFO(mode)) {
+        buf[0] = 'p';
+    } else if (S_ISLNK(mode)) {
+        buf[0] = 'l';
+    } else if (S_ISSOCK(mode)) {
+        buf[0] = 's';
+    }
+
+    // 设置权限
     if (mode & S_IRUSR) {
         buf[1] = 'r';
-    }
+    };
     if (mode & S_IWUSR) {
         buf[2] = 'w';
     }
     if (mode & S_IXUSR) {
         buf[3] = 'x';
     }
+    if (mode & S_ISUID) {
+        buf[3] = 's';
+    }
     if (mode & S_IRGRP) {
         buf[4] = 'r';
-    }
+    };
     if (mode & S_IWGRP) {
         buf[5] = 'w';
     }
     if (mode & S_IXGRP) {
         buf[6] = 'x';
     }
+    if (mode & S_ISGID) {
+        buf[6] = 's';
+    }
     if (mode & S_IROTH) {
         buf[7] = 'r';
-    }
+    };
     if (mode & S_IWOTH) {
         buf[8] = 'w';
     }
     if (mode & S_IXOTH) {
         buf[9] = 'x';
     }
+    if (mode & S_ISVTX) {
+        buf[9] = 't';
+    }
     buf[10] = '\0';
 }
 
-void parse_time(time_t time, char buf[]) {
+void
+parse_time(time_t time, char buf[]) {
     struct tm *p = localtime(&time);
     sprintf(buf, "%2d月  %2d %02d:%02d", p->tm_mon + 1,
         p->tm_mday, p->tm_hour, p->tm_min);
 }
 
-void parse_uid(uid_t uid, char buf[]) {
+void
+parse_uid(uid_t uid, char buf[]) {
     struct passwd *p = getpwuid(uid);
     strncpy(buf, p->pw_name, strlen(p->pw_name));
+    buf[strlen(p->pw_name)] = '\0';
 }
 
-void parse_gid(gid_t gid, char buf[]) {
+void
+parse_gid(gid_t gid, char buf[]) {
     struct group *p = getgrgid(gid);
     strncpy(buf, p->gr_name, strlen(p->gr_name));
+    buf[strlen(p->gr_name)] = '\0';
+}
+
+void sort(struct Record *head) {
+
 }
