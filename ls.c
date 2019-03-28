@@ -11,7 +11,12 @@
 #include <time.h>
 #include <dirent.h>
 
-// #define DEBUG
+#define DEBUG
+
+#define FILENAMEMAX 4095
+
+const char *CURRENT_DIR = ".";
+const char *PARENT_DIR = "..";
 
 typedef int bool;
 #define TRUE 1
@@ -39,7 +44,7 @@ struct Record {
     gid_t         re_gid;
     size_t        re_size;
     time_t        re_mtime;
-    char          re_filename[256];
+    char          re_filename[FILENAMEMAX + 1];
     struct Record *re_prev;
     struct Record *re_next;
     struct Record *re_child_head;
@@ -51,10 +56,15 @@ void Record_delete(struct Record *self);
 
 void append_child(struct Record *child, struct Record *parent);
 
+void traverse(struct Record **proot);
+
 void print_result(struct Record *root);
 void print_record(struct Record *rec);
 
 void sort(struct Record **phead, struct Record **ptail);
+
+int last_index_of(const char *str, char c);
+bool equals(const char *s1, const char *s2);
 
 bool verbose = FALSE;
 bool current_dir_only = FALSE;
@@ -118,34 +128,66 @@ parse_opt(const char *opt) {
 int
 execute() {
     struct stat stat_buf;
-    struct Record *rec;
     if (current_dir_only) {
         lstat(".", &stat_buf);
-        rec = Record_init(&stat_buf, ".");
+        struct Record *rec = Record_init(&stat_buf, ".");
         print_record(rec);
-        Record_delete(rec);
+        // TODO: 析构
     } else {
         struct Record *root = Record_init(NULL, ".");
+        char buf[FILENAMEMAX + 1];
         DIR *pdir = opendir(".");
         struct dirent *pde;
         while ((pde = readdir(pdir)) != NULL) {
             lstat(pde->d_name, &stat_buf);
-            rec = Record_init(&stat_buf, pde->d_name);
+            strcpy(buf, "./");
+            strncpy(buf + 2, pde->d_name, strlen(pde->d_name) + 1);
+            struct Record *rec = Record_init(&stat_buf, buf);
             append_child(rec, root);
         }
         closedir(pdir);
         if (recursive) {
-            
+            traverse(&root);
         }
         print_result(root);
         // TODO: 析构
     }
 }
 
+void 
+traverse(struct Record **proot) {
+    struct Record *parent = (*proot)->re_child_head;
+    while (parent != NULL) {
+        int offset = last_index_of(parent->re_filename, '/') + 1;
+        if (S_ISDIR(parent->re_mode) 
+                && !equals(parent->re_filename + offset, ".") 
+                && !equals(parent->re_filename + offset, "..")) {
+            // TODO: 什么情况下会为 NULL？
+            DIR *pdir = opendir(parent->re_filename);
+            if (pdir != NULL) {
+                struct dirent *pde;
+                struct Record *child;
+                while ((pde = readdir(pdir)) != NULL) {
+                    char buf[FILENAMEMAX + 1] = {'\0'};
+                    struct stat statbuf;
+                    lstat(pde->d_name, &statbuf);
+                    strncpy(buf, parent->re_filename, strlen(parent->re_filename) + 1);
+                    strncat(buf, "/", 2);
+                    strncat(buf, pde->d_name, strlen(pde->d_name) + 1);
+                    child = Record_init(&statbuf, buf);
+                    append_child(child, parent);
+                }
+                closedir(pdir);
+            }
+            traverse(&parent);
+        }
+        parent = parent->re_next;
+    }
+}
+
 struct Record *
 Record_init(struct stat *statbuf, char *fn) {
-    struct Record *result = (struct Record *) malloc(sizeof(struct Record));
-    
+    struct Record *result = (struct Record *) malloc(sizeof(struct Record));  
     if (statbuf != NULL) {
         result->re_ino = statbuf->st_ino;
         result->re_mode = statbuf->st_mode;
@@ -158,7 +200,6 @@ Record_init(struct stat *statbuf, char *fn) {
     strncpy(result->re_filename, fn, strlen(fn) + 1);
     result->re_prev = result->re_next = NULL;
     result->re_child_head = result->re_child_tail = NULL;
-
     return result;
 }
 
@@ -174,12 +215,6 @@ Record_delete(struct Record *self) {
 
 void
 append_child(struct Record *child, struct Record *parent) {
-#ifdef DEBUG
-    if (parent == NULL) {
-        perror("ERROR\n");
-        exit(EXIT_FAILURE);
-    }
-#endif
     if (parent->re_child_head == NULL) {
         parent->re_child_head = parent->re_child_tail = child;
     } else {
@@ -200,12 +235,23 @@ print_result(struct Record *root) {
     sort(&root->re_child_head, &root->re_child_tail);
     struct Record *p = root->re_child_head;
     while (p != NULL) {
-        if (all || (!all && p->re_filename[0] != '.')) {
+        if (all || p->re_filename[last_index_of(p->re_filename, '/') + 1] != '.') {
             print_record(p);
         }
         p = p->re_next;
     }
-    printf(verbose ? "" : "\n");
+    printf(verbose ? "\n" : "\n\n");
+
+    struct Record *q = root->re_child_head;
+    while (q != NULL) {
+        int offset = last_index_of(q->re_filename, '/') + 1;
+        if (S_ISDIR(q->re_mode) 
+                && !equals(q->re_filename + offset, ".") 
+                && !equals(q->re_filename + offset, "..")) {
+            print_result(q);
+        }
+        q = q->re_next;
+    }
 }
 
 /**
@@ -237,9 +283,10 @@ print_record(struct Record *rec) {
     if (S_ISDIR(rec->re_mode)) {
         printf("\33[1;34m");
     }
-    printf("%s", rec->re_filename);
+    printf("%s", 
+        rec->re_filename + last_index_of(rec->re_filename, '/') + 1);
     printf("\33[0m");
-    printf(verbose ? "\n" : "  ");
+    printf((current_dir_only || verbose) ? "\n" : "  ");
 }
 
 void
@@ -320,52 +367,50 @@ parse_gid(gid_t gid, char buf[]) {
     strncpy(buf, p->gr_name, strlen(p->gr_name) + 1);
 }
 
+// TODO: 修改 ptail
 void 
 sort(struct Record **phead, struct Record **ptail) {
     struct Record *p = (*phead)->re_next;
     while (p != NULL) {
-#ifdef DEBUG
-        printf("p: %s\n", p->re_filename);
-#endif
+        struct Record *r = p->re_next;
         struct Record *q = p->re_prev;
         while (q != NULL && strcmp(p->re_filename, q->re_filename) < 0) {
             q = q->re_prev;
         }
-        struct Record *r = p->re_next;
-        p->re_prev->re_next = p->re_next;
-        if (p->re_next != NULL) {
-            p->re_next->re_prev = p->re_prev;
-        }
         if (q != NULL) {
-#ifdef DEBUG
-            printf("  q: %s\n", q->re_filename);
-#endif
-            p->re_next = q->re_next;
-            p->re_prev = q;
-            if (p->re_next != NULL) {
-                p->re_next->re_prev = p;
+            if (p->re_prev != q) {
+                p->re_prev->re_next = p->re_next;
+                if (p->re_next != NULL) {
+                    p->re_next->re_prev = p->re_prev;
+                }
+                q->re_next->re_prev = p;
+                p->re_next = q->re_next;
+                p->re_prev = q;
+                q->re_next = p;
             }
-            p->re_prev->re_next = p;
         } else {
-#ifdef DEBUG
-            printf("  q: NULL\n");
-#endif
-            p->re_next = *phead;
+            p->re_prev->re_next = p->re_next;
             if (p->re_next != NULL) {
-                p->re_next->re_prev = p;
+                p->re_next->re_prev = p->re_prev;
             }
+            p->re_next = *phead;
+            p->re_next->re_prev = p;
             *phead = p;
         }
-
-#ifdef DEBUG
-        printf("    ");
-        struct Record *t = *phead;
-        while (t != NULL) {
-            printf("%s ", t->re_filename);
-            t = t->re_next;
-        }
-        printf("\n");
-#endif
         p = r;
     }
+}
+
+int last_index_of(const char *str, char c) {
+    int len = strlen(str);
+    for (int i = len - 1; i >= 0; i--) {
+        if (str[i] == c) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool equals(const char *s1, const char *s2) {
+    return strcmp(s1, s2) == 0;
 }
