@@ -12,7 +12,6 @@
 #include <dirent.h>
 
 #include "record.h"
-#include "list.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
@@ -29,7 +28,9 @@ enum ParseResult parse_opt(const char *opt);
 
 void execute();
 
-void traverse(struct Record **p_root);
+void construct_tree(struct Record **p_root);
+
+void traverse();
 
 void print_result(struct Record *root);
 
@@ -122,21 +123,9 @@ execute() {
         Record_delete(rec);
     } else {
         struct Record *root = Record_new(NULL, ".");
-        char buf[FILE_NAME_MAX + 1];
-        DIR *p_dir = opendir(".");
-        struct dirent *pde;
-        while ((pde = readdir(p_dir)) != NULL) {
-            memset(&stat_buf, 0x00, sizeof(struct stat));
-            strncpy(buf, "./", 2 + 1);
-            strncat(buf, pde->d_name, strlen(pde->d_name) + 1);
-            lstat(buf, &stat_buf);
-            struct Record *rec = Record_new(&stat_buf, buf);
-            append_child(rec, root);
-        }
-        closedir(p_dir);
-        sort(&root->m_child_head, &root->m_child_tail);
+        traverse(root);
         if (recursive) {
-            traverse(&root);
+            construct_tree(&root);
         }
         print_result(root);
         Record_delete(root);
@@ -144,33 +133,38 @@ execute() {
 }
 
 void
-traverse(struct Record **p_root) {
+construct_tree(struct Record **p_root) {
     struct Record *parent = (*p_root)->m_child_head;
     while (parent != NULL) {
         int offset = last_index_of(parent->m_filename, '/') + 1;
         if (S_ISDIR(parent->m_mode)
             && !equals(parent->m_filename + offset, ".")
             && !equals(parent->m_filename + offset, "..")) {
-            // TODO: 什么情况下会为 NULL？
-            DIR *p_dir = opendir(parent->m_filename);
-            if (p_dir != NULL) {
-                char buf[FILE_NAME_MAX + 1];
-                struct dirent *pde;
-                while ((pde = readdir(p_dir)) != NULL) {
-                    memset(&stat_buf, 0x00, sizeof(struct stat));
-                    strncpy(buf, parent->m_filename, strlen(parent->m_filename) + 1);
-                    strncat(buf, "/", 1 + 1);
-                    strncat(buf, pde->d_name, strlen(pde->d_name) + 1);
-                    lstat(buf, &stat_buf);
-                    struct Record *child = Record_new(&stat_buf, buf);
-                    append_child(child, parent);
-                }
-                closedir(p_dir);
-                sort(&parent->m_child_head, &parent->m_child_tail);
-            }
-            traverse(&parent);
+            traverse(parent);
+            construct_tree(&parent);
         }
         parent = parent->m_next;
+    }
+}
+
+void traverse(struct Record *parent) {
+    const char *parent_filename = parent->m_filename;
+    DIR *p_dir = opendir(parent_filename);
+    // TODO: 什么情况下会为 NULL？
+    if (p_dir != NULL) {
+        char buf[FILE_NAME_MAX + 1];
+        struct dirent *p_de;
+        while ((p_de = readdir(p_dir)) != NULL) {
+            memset(&stat_buf, 0x00, sizeof(struct stat));
+            strncpy(buf, parent_filename, strlen(parent_filename) + 1);
+            strncat(buf, "/", 1 + 1);
+            strncat(buf, p_de->d_name, strlen(p_de->d_name) + 1);
+            lstat(buf, &stat_buf);
+            struct Record *child = Record_new(&stat_buf, buf);
+            append_child(child, parent);
+        }
+        closedir(p_dir);
+        sort(&parent->m_child_head, &parent->m_child_tail);
     }
 }
 
@@ -180,6 +174,7 @@ print_result(struct Record *root) {
         printf("%s:\n", root->m_filename);
     }
 
+    // 对齐宽度
     int inode_width = 0;
     int nlink_width = 0;
     int user_width = 0;
@@ -201,7 +196,8 @@ print_result(struct Record *root) {
     struct Record *q = root->m_child_head;
     while (q != NULL) {
         if (all || q->m_filename[last_index_of(q->m_filename, '/') + 1] != '.') {
-            print_record(q, inode_width, nlink_width, user_width, group_width, size_width);
+            print_record(q, inode_width, nlink_width, 
+                user_width, group_width, size_width);
         }
         q = q->m_next;
     }
@@ -220,7 +216,8 @@ print_result(struct Record *root) {
 }
 
 void
-print_record(struct Record *rec, int inode_width, int nlink_width, int user_width, int group_width, int size_width) {
+print_record(struct Record *rec, int inode_width, int nlink_width, 
+             int user_width, int group_width, int size_width) {
     char buf[1024];
     if (show_inode) {
         printf("%*ld ", inode_width, rec->m_ino);
@@ -258,22 +255,15 @@ sort(struct Record **p_head, struct Record **p_tail) {
         }
         if (q != NULL) {
             if (p->m_prev != q) {
-                p->m_prev->m_next = p->m_next;
-                if (p->m_next != NULL) {
-                    p->m_next->m_prev = p->m_prev;
-                }
+                remove_child(p);
                 q->m_next->m_prev = p;
                 p->m_next = q->m_next;
                 p->m_prev = q;
                 q->m_next = p;
             }
         } else {
-            p->m_prev->m_next = p->m_next;
-            if (p->m_next != NULL) {
-                p->m_next->m_prev = p->m_prev;
-            }
+            remove_child(p);
             p->m_next = *p_head;
-            p->m_prev = NULL;
             p->m_next->m_prev = p;
             *p_head = p;
         }

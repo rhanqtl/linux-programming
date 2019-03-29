@@ -3,7 +3,6 @@
 //
 
 #include <string.h>
-
 #include "record.h"
 
 struct Record *
@@ -40,6 +39,17 @@ append_child(struct Record *child, struct Record *parent) {
         child->m_prev = parent->m_child_tail;
         parent->m_child_tail = child;
     }
+}
+
+void
+remove_child(struct Record *p) {
+    if (p->m_prev != NULL) {
+        p->m_prev->m_next = p->m_next;
+    }
+    if (p->m_next != NULL) {
+        p->m_next->m_prev = p->m_prev;
+    }
+    p->m_next = p->m_prev = NULL;
 }
 
 void

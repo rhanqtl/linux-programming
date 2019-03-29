@@ -41,6 +41,8 @@ void Record_delete(struct Record *self);
 
 void append_child(struct Record *child, struct Record *parent);
 
+void remove_child(struct Record *p);
+
 void parse_mode(mode_t mode, char buf[]);
 
 void parse_time(time_t time, char buf[]);
