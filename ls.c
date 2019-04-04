@@ -147,10 +147,10 @@ construct_tree(struct Record **p_root) {
     }
 }
 
-void traverse(struct Record *parent) {
+void
+traverse(struct Record *parent) {
     const char *parent_filename = parent->m_filename;
     DIR *p_dir = opendir(parent_filename);
-    // TODO: 什么情况下会为 NULL？
     if (p_dir != NULL) {
         char buf[FILE_NAME_MAX + 1];
         struct dirent *p_de;
@@ -203,15 +203,19 @@ print_result(struct Record *root) {
     }
     printf(verbose ? "\n" : "\n\n");
 
-    struct Record *r = root->m_child_head;
-    while (r != NULL) {
-        int offset = last_index_of(r->m_filename, '/') + 1;
-        if (S_ISDIR(r->m_mode)
-            && !equals(r->m_filename + offset, ".")
-            && !equals(r->m_filename + offset, "..")) {
-            print_result(r);
+    if (recursive) {
+        struct Record *r = root->m_child_head;
+        while (r != NULL) {
+            int offset = last_index_of(r->m_filename, '/') + 1;
+            if (S_ISDIR(r->m_mode)
+                && !equals(r->m_filename + offset, ".")
+                && !equals(r->m_filename + offset, "..")) {
+                if (all || r->m_filename[last_index_of(r->m_filename, '/') + 1] != '.') {
+                    print_result(r);
+                }
+            }
+            r = r->m_next;
         }
-        r = r->m_next;
     }
 }
 
@@ -278,7 +282,8 @@ sort(struct Record **p_head, struct Record **p_tail) {
     }
 }
 
-int last_index_of(const char *str, char c) {
+int
+last_index_of(const char *str, char c) {
     int len = strlen(str);
     for (int i = len - 1; i >= 0; i--) {
         if (str[i] == c) {
@@ -288,11 +293,13 @@ int last_index_of(const char *str, char c) {
     return -1;
 }
 
-bool equals(const char *s1, const char *s2) {
+bool
+equals(const char *s1, const char *s2) {
     return strcmp(s1, s2) == 0;
 }
 
-int filename_compare(const char *s1, const char *s2) {
+int
+filename_compare(const char *s1, const char *s2) {
     char c1, c2;
     while (s1 != NULL && s2 != NULL) {
         c1 = to_upper(*s1);
@@ -313,14 +320,16 @@ int filename_compare(const char *s1, const char *s2) {
     return 1;
 }
 
-char to_upper(char c) {
+char
+to_upper(char c) {
     if ('a' <= c && c <= 'z') {
         return c - 'a' + 'A';
     }
     return c;
 }
 
-int digits(int x) {
+int
+digits(int x) {
     int result = 1;
     while (x >= 10) {
         result++;

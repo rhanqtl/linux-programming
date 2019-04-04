@@ -35,7 +35,8 @@ int total_num_bytes = 0;
 
 struct Node *head, *tail;
 
-int main(int argc, const char *argv[]) {
+int
+main(int argc, const char *argv[]) {
     if (argc <= 1) {
         perror("wc: 错误: 没有输入文件\n");
         exit(-1);
@@ -50,7 +51,8 @@ int main(int argc, const char *argv[]) {
     return 0;
 }
 
-struct Node * count(const char *filename) {
+struct Node *
+count(const char *filename) {
     int newlines = 0, words = 0, bytes = 0;
     FILE *fp = fopen(filename, "r");
     bool in_word = false;
@@ -80,7 +82,8 @@ struct Node * count(const char *filename) {
     return Node_init(filename, newlines, words, bytes);
 }
 
-struct Node *Node_init(const char *fn, int newlines, int words, int bytes) {
+struct Node *
+Node_init(const char *fn, int newlines, int words, int bytes) {
     struct Node *result = (struct Node *) malloc(sizeof(struct Node));
     if (result == NULL) {
         perror("\33[1;31m错误:\33[0m 内存不足\n");
@@ -95,11 +98,13 @@ struct Node *Node_init(const char *fn, int newlines, int words, int bytes) {
     return result;
 }
 
-void Node_delete(struct Node *self) {
+void 
+Node_delete(struct Node *self) {
     free(self);
 }
 
-void append(struct Node *x) {
+void 
+append(struct Node *x) {
     if (head == NULL) {
         head = tail = x;
     } else {
@@ -108,7 +113,8 @@ void append(struct Node *x) {
     }
 }
 
-void destroy() {
+void 
+destroy() {
     struct Node *p = head, *q;
     while (p != NULL) {
         q = p;
@@ -117,20 +123,26 @@ void destroy() {
     }
 }
 
-void print() {
+void 
+print() {
     int width = digits(MAX(total_num_newlines, 
         MAX(total_num_words, total_num_bytes))) + 1;
+    int record_count = 0;
     struct Node *p = head;
     while (p != NULL) {
         printf("%*d%*d%*d %s\n", width, p->num_newlines,
             width, p->num_words, width, p->num_bytes, p->filename);
         p = p->next;
+        record_count++;
     }
-    printf("%*d%*d%*d 总用量\n", width, total_num_newlines,
-        width, total_num_words, width, total_num_bytes);
+    if (record_count > 1) {
+        printf("%*d%*d%*d 总用量\n", width, total_num_newlines,
+            width, total_num_words, width, total_num_bytes);
+    }
 }
 
-int digits(int x) {
+int 
+digits(int x) {
     int result = 1;
     while (x >= 10) {
         result++;
