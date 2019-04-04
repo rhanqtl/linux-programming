@@ -1,7 +1,8 @@
 CC = gcc
+OUTPUT_DIR = ..
 
 ls: ls.o record.o
-	$(CC) ls.o record.o -o ls
+	$(CC) ls.o record.o -o $(OUTPUT_DIR)/ls
 	rm *.o
 
 ls.o: ls.c
